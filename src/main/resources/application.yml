@@ -1,10 +1,9 @@
-
 spring:
   application:
     name: assisment
   datasource:
     url: jdbc:postgresql://localhost:5432/booking_db
-    username: ${POSTGRES_USER:root }
+    username: ${POSTGRES_USER:root}
     password: ${POSTGRES_PASSWORD:root}
     driver-class-name: org.postgresql.Driver
     hikari:
@@ -36,6 +35,7 @@ spring:
       host: localhost
       port: 6379
       timeout: 2000
+
 
 server:
   port: 8080

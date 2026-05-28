@@ -1,5 +1,6 @@
 package com.mittal.shivam.assisment.Entities;
 
+import com.mittal.shivam.assisment.model.OfferingStatus;
 import jakarta.persistence.*;
 import lombok.*;
 import java.util.ArrayList;
