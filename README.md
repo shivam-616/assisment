@@ -1,84 +1,323 @@
 # Global Class Offering Booking System
 
-A robust, highly concurrent backend service for a global live-learning platform. This system allows teachers to schedule classes in their local timezones and enables parents to book those classes, with mathematical guarantees against double-booking and schedule overlaps.
-
-## 🚀 Tech Stack
-* **Framework:** Java 17, Spring Boot 3.4.0
-* **Database:** PostgreSQL 16 (Relational/ACID) & Redis 7 (Distributed Caching/Locking)
-* **Migrations:** Flyway
-* **Security:** Stateless JWT Auth with Role-Based Access Control (RBAC)
-* **Infrastructure:** Docker & Docker Compose
+A highly concurrent backend platform for a global live-learning ecosystem. The system enables teachers to create and manage classes in their local time zones while allowing parents to securely book available sessions. The architecture is designed to guarantee consistency, prevent double-booking, and handle timezone complexities at a global scale.
 
 ---
 
-## 🧠 Key Architectural Decisions
+## 🚀 Technology Stack
 
-### 1. The Timezone Engine (Absolute UTC)
-Handling global timezones is notoriously error-prone due to Daylight Saving Time (DST) shifts. 
-* **Database Layer:** All time columns (`start_time_utc`, `end_time_utc`) are stored as pure `TIMESTAMP` (without timezone) epochs. The database acts as a dumb storage layer for absolute time.
-* **Application Layer:** Java's `Instant` is used internally. A dedicated `TimezoneService` translates local times (e.g., `America/New_York`) to UTC upon entry, and translates UTC back to local `ZonedDateTime` at the API boundary based on the requesting user's profile.
+| Category                    | Technology                       |
+| --------------------------- | -------------------------------- |
+| Language                    | Java 17                          |
+| Framework                   | Spring Boot 3.4                  |
+| Database                    | PostgreSQL 16                    |
+| Cache & Distributed Locking | Redis 7                          |
+| Database Migration          | Flyway                           |
+| Authentication              | JWT (Stateless)                  |
+| Authorization               | Role-Based Access Control (RBAC) |
+| Containerization            | Docker & Docker Compose          |
 
-### 2. Dual-Layer Concurrency Control (Double-Booking Prevention)
-To satisfy strict conflict resolution requirements under high load, the booking engine utilizes a two-tiered defense:
-* **Layer 1: Redis Distributed Locks:** Prevents the "thundering herd" problem. If a parent clicks "Book" 10 times in 100ms, Redis `SETNX` short-lived locks ensure only the first request enters the database transaction pool.
-* **Layer 2: Serializable Transactions & Interval Queries:** The core booking method operates under `@Transactional(isolation = Isolation.SERIALIZABLE)`. It executes a native-style overlapping interval query `(Start A < Target End AND End A > Target Start)` to mathematically guarantee no schedule conflicts exist before confirming the booking.
+---
 
-### 3. Schema Versioning
-Hibernate `ddl-auto` is strictly disabled. All schema changes, indexes, and constraints are managed via version-controlled Flyway SQL scripts (`V1__init_schema.sql`). Strategic composite indexes exist on `sessions(start_time_utc, end_time_utc)` to ensure the overlap queries execute in sub-millisecond time.
+## 🏗️ System Architecture & Design Decisions
+
+### 1. Timezone Management Engine
+
+Handling global time zones accurately is one of the most challenging aspects of scheduling systems, especially when Daylight Saving Time (DST) changes occur.
+
+#### Database Layer
+
+All session timestamps are stored in UTC using:
+
+* `start_time_utc`
+* `end_time_utc`
+
+The database acts purely as a storage layer for absolute timestamps.
+
+#### Application Layer
+
+Java's `Instant` serves as the internal representation of time.
+
+A dedicated `TimezoneService` is responsible for:
+
+* Converting teacher-provided local times to UTC before persistence.
+* Converting stored UTC timestamps back into localized `ZonedDateTime` values when responding to API requests.
+* Automatically handling DST transitions without manual intervention.
+
+This approach guarantees consistent scheduling across all geographical regions.
+
+---
+
+### 2. Dual-Layer Concurrency Protection
+
+To prevent race conditions and booking conflicts under heavy traffic, the booking workflow uses a two-tier protection mechanism.
+
+#### Layer 1: Redis Distributed Locks
+
+Redis short-lived locks (`SETNX`) ensure that duplicate booking requests from the same user are filtered before reaching the database.
+
+Benefits:
+
+* Prevents request storms.
+* Reduces database contention.
+* Handles rapid repeated clicks gracefully.
+
+#### Layer 2: Serializable Database Transactions
+
+The booking process executes within:
+
+```java
+@Transactional(isolation = Isolation.SERIALIZABLE)
+```
+
+Before confirming a booking, the system performs an interval-overlap validation:
+
+```sql
+(Start_A < End_B)
+AND
+(End_A > Start_B)
+```
+
+This mathematical condition guarantees that conflicting schedules cannot exist simultaneously.
+
+As a result, the platform maintains strict consistency even under extreme concurrent booking loads.
+
+---
+
+### 3. Database Versioning & Schema Management
+
+Database schema changes are fully version-controlled using Flyway.
+
+#### Key Principles
+
+* Hibernate `ddl-auto` is disabled.
+* All schema modifications are maintained through migration scripts.
+* Database structure remains reproducible across environments.
+
+Example migration:
+
+```text
+V1__init_schema.sql
+```
+
+#### Performance Optimization
+
+Strategic composite indexes are created on:
+
+```sql
+(start_time_utc, end_time_utc)
+```
+
+These indexes enable overlap checks to execute with minimal latency, even as data volume grows.
 
 ---
 
 ## ⚙️ Local Development Setup
 
 ### Prerequisites
-* Docker & Docker Compose
-* Java 17+
-* Maven (or use the provided `mvnw`)
 
-### 1. Start the Infrastructure
-Spin up the isolated PostgreSQL and Redis containers from the `src` directory:
+* Java 17+
+* Docker
+* Docker Compose
+* Maven (or Maven Wrapper)
+
+---
+
+### Step 1: Start Infrastructure Services
+
+From the infrastructure directory:
+
 ```bash
 cd assisment/src
 docker-compose up -d
 ```
 
-### 2. Build and Run the Application
-Navigate back to the project root and use the Maven wrapper:
+This launches:
+
+* PostgreSQL
+* Redis
+
+---
+
+### Step 2: Build and Run the Application
+
+Navigate to the project root:
+
 ```bash
 cd ..
 ./mvnw clean install
 ./mvnw spring-boot:run
 ```
 
-### 3. Running Unit Tests
-Verify the core logic, timezone conversions, and concurrency controls:
+---
+
+### Step 3: Execute Unit Tests
+
 ```bash
 ./mvnw test
 ```
 
----
+The test suite validates:
 
-## 🛠 API Endpoints (Quick Reference)
-
-### Authentication
-* `POST /api/v1/auth/register` - Create a new user (TEACHER/PARENT)
-* `POST /api/v1/auth/login` - Obtain a JWT token
-
-### Teacher Flow (Requires ROLE_TEACHER)
-* `POST /api/v1/teachers/courses` - Create a new Course
-* `POST /api/v1/teachers/offerings` - Create an Offering for a Course
-* `POST /api/v1/teachers/offerings/{id}/sessions` - Add sessions (localized) to an offering
-* `GET /api/v1/teachers/offerings` - View my offerings (localized to teacher's timezone)
-
-### Parent Flow (Requires ROLE_PARENT)
-* `GET /api/v1/parents/offerings` - View available published offerings (localized to parent's timezone)
-* `POST /api/v1/parents/bookings` - Book an offering (concurrency-protected)
-* `GET /api/v1/parents/bookings` - View my confirmed bookings (localized)
+* Booking logic
+* Timezone conversions
+* Concurrency safeguards
+* Business rules
 
 ---
 
-## 🧪 Robustness & Reliability
-The system includes:
-* **Global Exception Handler**: Standardized JSON error responses for 400, 409, and 500 status codes.
-* **Unit Testing**: 100% coverage of critical path logic in `BookingService` and `TimezoneService`.
-* **Database Integrity**: Serializable isolation levels ensure that even under extreme concurrency, the "double-booking" invariant is never violated.
+## 🔐 Authentication APIs
+
+### Register User
+
+```http
+POST /api/v1/auth/register
+```
+
+Creates a new user with either:
+
+* TEACHER role
+* PARENT role
+
+---
+
+### Login
+
+```http
+POST /api/v1/auth/login
+```
+
+Returns a JWT token used to access protected endpoints.
+
+---
+
+## 👨‍🏫 Teacher APIs
+
+Requires `ROLE_TEACHER`.
+
+| Method | Endpoint                                 | Description            |
+| ------ | ---------------------------------------- | ---------------------- |
+| POST   | /api/v1/teachers/courses                 | Create a course        |
+| POST   | /api/v1/teachers/offerings               | Create an offering     |
+| POST   | /api/v1/teachers/offerings/{id}/sessions | Add localized sessions |
+| GET    | /api/v1/teachers/offerings               | View teacher offerings |
+
+---
+
+## 👨‍👩‍👧 Parent APIs
+
+Requires `ROLE_PARENT`.
+
+| Method | Endpoint                  | Description              |
+| ------ | ------------------------- | ------------------------ |
+| GET    | /api/v1/parents/offerings | View published offerings |
+| POST   | /api/v1/parents/bookings  | Book an offering         |
+| GET    | /api/v1/parents/bookings  | View confirmed bookings  |
+
+---
+
+## 📚 Swagger Documentation
+
+Access Swagger UI:
+
+```text
+http://localhost:8080/swagger-ui/index.html
+```
+
+### Generate JWT Token
+
+1. Open `POST /api/v1/auth/register`.
+2. Click **Try it Out**.
+3. Submit a request such as:
+
+```json
+{
+  "email": "teacher@test.com",
+  "role": "TEACHER",
+  "timezone": "America/New_York"
+}
+```
+
+4. Copy the JWT token from the response.
+
+### Authorize Swagger
+
+1. Click the **Authorize** button.
+2. Paste the token value.
+3. Click **Authorize**.
+
+Swagger will automatically include the token in future requests.
+
+### Test Protected APIs
+
+You can now directly invoke:
+
+```text
+/api/v1/teachers/*
+```
+
+and
+
+```text
+/api/v1/parents/*
+```
+
+without manually adding authorization headers.
+
+---
+
+## 🧪 Reliability & Quality Assurance
+
+### Global Exception Handling
+
+Standardized API responses are provided for:
+
+* 400 Bad Request
+* 401 Unauthorized
+* 403 Forbidden
+* 409 Conflict
+* 500 Internal Server Error
+
+---
+
+### Unit Testing
+
+Comprehensive test coverage is implemented for:
+
+* BookingService
+* TimezoneService
+* Validation logic
+* Conflict detection mechanisms
+
+---
+
+### Strong Consistency Guarantees
+
+The platform ensures:
+
+✅ No double bookings
+
+✅ No overlapping schedules
+
+✅ Timezone-safe scheduling
+
+✅ ACID-compliant transactions
+
+✅ Concurrency-safe booking operations
+
+---
+
+## 🎯 Key Features
+
+* Global timezone support with DST handling
+* Secure JWT authentication
+* Role-based access control (Teacher/Parent)
+* Distributed locking with Redis
+* Serializable transaction isolation
+* Flyway-managed database migrations
+* Dockerized development environment
+* Swagger/OpenAPI integration
+* High-concurrency booking protection
+* Comprehensive unit testing
+
+This architecture provides a scalable, production-ready foundation for a global live-learning platform while guaranteeing scheduling correctness and booking consistency under heavy load.
