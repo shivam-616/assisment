@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Global Booking System - API Tester</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; background-color: #f5f7fa; color: #333; }
+        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        h1, h2, h3 { margin-top: 0; color: #2c3e50; }
+        button { background-color: #3498db; color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; margin-right: 10px; margin-bottom: 10px; font-weight: bold; }
+        button:hover { background-color: #2980b9; }
+        .btn-parent { background-color: #9b59b6; }
+        .btn-parent:hover { background-color: #8e44ad; }
+        input[type="text"], input[type="email"] { padding: 8px; margin-bottom: 10px; width: calc(100% - 20px); border: 1px solid #ddd; border-radius: 4px; }
+        pre { background: #2d2d2d; color: #a6e22e; padding: 15px; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; font-size: 14px; }
+        .status-badge { display: inline-block; padding: 5px 10px; border-radius: 12px; font-size: 12px; font-weight: bold; background: #e74c3c; color: white; margin-bottom: 15px; }
+        .status-badge.active { background: #2ecc71; }
+        .flex-row { display: flex; gap: 10px; margin-bottom: 10px; }
+        .flex-row input { margin-bottom: 0; }
+    </style>
+</head>
+<body>
+
+<h1>API Tester</h1>
+<div id="authStatus" class="status-badge">Not Authenticated</div>
+
+<div class="card">
+    <h2>1. Authentication</h2>
+    <p>Register to get a JWT token. The token will be automatically attached to future requests.</p>
+    <div class="flex-row">
+        <input type="email" id="authEmail" placeholder="user@example.com" value="teacher@test.com">
+        <input type="text" id="authTimezone" placeholder="Timezone" value="America/New_York">
+    </div>
+    <button onclick="register('TEACHER')">Register as TEACHER</button>
+    <button class="btn-parent" onclick="register('PARENT')">Register as PARENT</button>
+    <p><strong>Current Token:</strong> <span id="tokenDisplay" style="word-break: break-all; font-family: monospace; color: #7f8c8d;">None</span></p>
+</div>
+
+<div class="card" style="border-left: 4px solid #3498db;">
+    <h2>2. Teacher Actions</h2>
+
+    <h3>A. Create Course</h3>
+    <button onclick="createCourse()">Create 'Python 101' Course</button>
+    <input type="text" id="courseId" placeholder="Extracted Course ID will appear here...">
+
+    <h3>B. Create Offering</h3>
+    <button onclick="createOffering()">Create 'Summer Batch' Offering</button>
+    <input type="text" id="offeringId" placeholder="Extracted Offering ID will appear here...">
+
+    <h3>C. Add Sessions (Publish Offering)</h3>
+    <button onclick="addSessions()">Add 2 Sessions to Offering</button>
+
+    <h3>D. View My Schedule</h3>
+    <button onclick="getTeacherOfferings()">GET /teachers/offerings</button>
+</div>
+
+<div class="card" style="border-left: 4px solid #9b59b6;">
+    <h2>3. Parent Actions</h2>
+
+    <h3>A. Browse Available Offerings</h3>
+    <button class="btn-parent" onclick="getAvailableOfferings()">GET /parents/offerings</button>
+
+    <h3>B. Book an Offering</h3>
+    <p>Make sure an Offering ID is populated in the Teacher section above, and you are logged in as a PARENT.</p>
+    <button class="btn-parent" onclick="bookOffering()">Book Offering</button>
+    <button class="btn-parent" style="background-color: #e74c3c;" onclick="bookOffering()">Attempt Double-Booking</button>
+
+    <h3>C. View My Bookings</h3>
+    <button class="btn-parent" onclick="getParentBookings()">GET /parents/bookings</button>
+</div>
+
+<div class="card">
+    <h2>API Response Console</h2>
+    <pre id="consoleOutput">Waiting for actions...</pre>
+</div>
+
+<script>
+    const API_BASE = 'http://localhost:8080/api/v1';
+    let currentToken = '';
+
+    // Helper to log out to the screen
+    function logResponse(method, endpoint, data) {
+        const out = document.getElementById('consoleOutput');
+        out.textContent = `[${method}] ${endpoint}\n\n${JSON.stringify(data, null, 2)}`;
+    }
+
+    // Helper for authorized fetch
+    async function authFetch(endpoint, method = 'GET', body = null) {
+        const headers = { 'Content-Type': 'application/json' };
+        if (currentToken) headers['Authorization'] = `Bearer ${currentToken}`;
+
+        const options = { method, headers };
+        if (body) options.body = JSON.stringify(body);
+
+        try {
+            const response = await fetch(`${API_BASE}${endpoint}`, options);
+            let data;
+            const contentType = response.headers.get("content-type");
+            if (contentType && contentType.indexOf("application/json") !== -1) {
+                data = await response.json();
+            } else {
+                data = await response.text();
+            }
+
+            logResponse(method, endpoint, response.ok ? data : { Error: `HTTP ${response.status}`, Details: data });
+            return { ok: response.ok, data };
+        } catch (err) {
+            logResponse(method, endpoint, { Error: "Network or CORS error. Is the server running and CORS enabled?" });
+        }
+    }
+
+    // --- AUTH ---
+    async function register(role) {
+        const email = document.getElementById('authEmail').value;
+        const timezone = document.getElementById('authTimezone').value;
+
+        const { ok, data } = await authFetch('/auth/register', 'POST', { email, role, timezone });
+        if (ok && data.token) {
+            currentToken = data.token;
+            document.getElementById('tokenDisplay').textContent = currentToken.substring(0, 30) + '...';
+            const statusBadge = document.getElementById('authStatus');
+            statusBadge.textContent = `Authenticated as ${role} (${timezone})`;
+            statusBadge.className = 'status-badge active';
+
+            // Switch default emails to speed up testing
+            if(role === 'TEACHER') document.getElementById('authEmail').value = 'parent@test.com';
+        }
+    }
+
+    // --- TEACHER ---
+    async function createCourse() {
+        const { ok, data } = await authFetch('/teachers/courses', 'POST', {
+            title: "Python 101",
+            description: "Intro to Python for beginners"
+        });
+        if (ok && data.id) document.getElementById('courseId').value = data.id;
+    }
+
+    async function createOffering() {
+        const courseId = document.getElementById('courseId').value;
+        if (!courseId) return alert("Create a course first!");
+        const { ok, data } = await authFetch('/teachers/offerings', 'POST', {
+            courseId: courseId,
+            title: "Saturday Morning Batch"
+        });
+        if (ok && data.id) document.getElementById('offeringId').value = data.id;
+    }
+
+    async function addSessions() {
+        const offeringId = document.getElementById('offeringId').value;
+        if (!offeringId) return alert("Create an offering first!");
+
+        // Generate future dates programmatically for safety
+        const nextSaturday = new Date();
+        nextSaturday.setDate(nextSaturday.getDate() + (6 - nextSaturday.getDay()));
+        const formattedDate = nextSaturday.toISOString().split('T')[0];
+
+        await authFetch(`/teachers/offerings/${offeringId}/sessions`, 'POST', [
+            { startTime: `${formattedDate}T10:00:00`, endTime: `${formattedDate}T11:00:00`, teacherTimezone: "America/New_York" },
+            { startTime: `${formattedDate}T12:00:00`, endTime: `${formattedDate}T13:00:00`, teacherTimezone: "America/New_York" }
+        ]);
+    }
+
+    async function getTeacherOfferings() { await authFetch('/teachers/offerings', 'GET'); }
+
+    // --- PARENT ---
+    async function getAvailableOfferings() { await authFetch('/parents/offerings', 'GET'); }
+
+    async function bookOffering() {
+        const offeringId = document.getElementById('offeringId').value;
+        if (!offeringId) return alert("We need an Offering ID from the Teacher section!");
+        await authFetch('/parents/bookings', 'POST', { offeringId });
+    }
+
+    async function getParentBookings() { await authFetch('/parents/bookings', 'GET'); }
+</script>
+</body>
+</html>

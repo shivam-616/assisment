@@ -2,6 +2,7 @@ package com.mittal.shivam.assisment.controller;
 
 import com.mittal.shivam.assisment.Entities.Course;
 import com.mittal.shivam.assisment.Entities.Offering;
+import com.mittal.shivam.assisment.dto.ResponseDtos.OfferingResponseDto;
 import com.mittal.shivam.assisment.dto.TeacherDtos.*;
 import com.mittal.shivam.assisment.service.TeacherService;
 import org.springframework.http.ResponseEntity;
@@ -19,6 +20,11 @@ public class TeacherController {
 
     public TeacherController(TeacherService teacherService) {
         this.teacherService = teacherService;
+    }
+
+    @GetMapping("/offerings")
+    public ResponseEntity<List<OfferingResponseDto>> getOfferings(Principal principal) {
+        return ResponseEntity.ok(teacherService.getTeacherOfferings(principal.getName()));
     }
 
     @PostMapping("/courses")

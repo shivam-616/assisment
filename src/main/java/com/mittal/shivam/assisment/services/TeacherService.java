@@ -4,6 +4,7 @@ import com.mittal.shivam.assisment.Entities.Course;
 import com.mittal.shivam.assisment.Entities.Offering;
 import com.mittal.shivam.assisment.Entities.Session;
 import com.mittal.shivam.assisment.Entities.User;
+import com.mittal.shivam.assisment.dto.ResponseDtos.*;
 import com.mittal.shivam.assisment.dto.TeacherDtos.*;
 import com.mittal.shivam.assisment.model.OfferingStatus;
 import com.mittal.shivam.assisment.repository.CourseRepository;
@@ -16,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 public class TeacherService {
@@ -34,6 +36,34 @@ public class TeacherService {
         this.sessionRepository = sessionRepository;
         this.userRepository = userRepository;
         this.timezoneService = timezoneService;
+    }
+
+    @Transactional(readOnly = true)
+    public List<OfferingResponseDto> getTeacherOfferings(String teacherEmail) {
+        User teacher = userRepository.findByEmail(teacherEmail)
+                .orElseThrow(() -> new RuntimeException("Teacher not found"));
+
+        List<Offering> offerings = offeringRepository.findByTeacherId(teacher.getId());
+
+        return offerings.stream().map(offering -> mapToOfferingResponse(offering, teacher.getTimezone()))
+                .collect(Collectors.toList());
+    }
+
+    private OfferingResponseDto mapToOfferingResponse(Offering offering, String timezone) {
+        List<SessionResponseDto> sessionDtos = offering.getSessions().stream()
+                .map(session -> new SessionResponseDto(
+                        session.getId(),
+                        timezoneService.convertToLocal(session.getStartTimeUtc(), timezone).toString(),
+                        timezoneService.convertToLocal(session.getEndTimeUtc(), timezone).toString()
+                )).collect(Collectors.toList());
+
+        return new OfferingResponseDto(
+                offering.getId(),
+                offering.getTitle(),
+                offering.getCourse().getTitle(),
+                offering.getStatus().name(),
+                sessionDtos
+        );
     }
 
     @Transactional
